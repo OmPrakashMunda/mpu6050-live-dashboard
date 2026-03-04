@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <title>MPU6050 MIDI Instrument</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --bg: #080b0f; --surface: #0e1318; --border: #1e2a35;
+      --text: #e0eaf4; --muted: #4a6070; --accent: #00aaff;
+      --danger: #ff4455; --success: #00dd88; --warn: #ffcc00;
+    }
+    [data-theme="light"] {
+      --bg: #f0f4f8; --surface: #ffffff; --border: #c8d6e0;
+      --text: #0a1520; --muted: #7a90a0; --accent: #0077cc;
+      --danger: #cc2233; --success: #009955; --warn: #cc9900;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Courier New', monospace; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    input[type=text], input[type=range] { font-family: 'Courier New', monospace; }
+
+    button {
+      background: transparent; border: 1px solid var(--accent); color: var(--accent);
+      padding: 6px 14px; font-family: 'Courier New', monospace; font-size: 12px;
+      cursor: pointer; letter-spacing: 1px; text-transform: uppercase; transition: background 0.15s;
+    }
+    button:hover { background: var(--accent); color: var(--bg); }
+    #theme-btn { border-color: var(--muted); color: var(--muted); }
+    #theme-btn:hover { background: var(--muted); color: var(--bg); }
+
+    input[type=text] {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 6px 12px; font-size: 12px; width: 160px; outline: none;
+    }
+    input[type=text]:focus { border-color: var(--accent); }
+    input[type=text]::placeholder { color: var(--muted); }
+
+    input[type=range] {
+      -webkit-appearance: none; height: 2px; background: var(--border);
+      outline: none; width: 100%;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 12px; height: 12px;
+      background: var(--accent); cursor: pointer;
+    }
+
+    #status-dot { width: 8px; height: 8px; background: var(--danger); display: inline-block; margin-right: 4px; }
+    #status-dot.connected { background: var(--success); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    /* Piano keys */
+    #piano { display: flex; align-items: flex-end; justify-content: center; gap: 3px; padding: 12px; }
+    .key {
+      width: 44px; height: 120px; border: 1px solid var(--border);
+      background: var(--surface); cursor: pointer; position: relative;
+      display: flex; align-items: flex-end; justify-content: center;
+      padding-bottom: 8px; font-size: 9px; color: var(--muted); letter-spacing: 1px;
+      transition: background 0.05s, transform 0.05s;
+      flex-shrink: 0;
+    }
+    .key.active { background: var(--accent); color: var(--bg); transform: scaleY(0.97); }
+    .key.sharp {
+      width: 28px; height: 72px; background: var(--text); color: var(--bg);
+      margin: 0 -14px; z-index: 2; font-size: 8px;
+    }
+    .key.sharp.active { background: var(--accent); }
+
+    /* Visualizer */
+    #viz-wrap { position: relative; flex: 1; overflow: hidden; }
+    #viz { width: 100%; height: 100%; display: block; }
+
+    /* Note display */
+    #note-display {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      font-size: 72px; font-weight: bold; color: var(--accent);
+      opacity: 0; transition: opacity 0.1s; letter-spacing: 8px;
+      pointer-events: none; text-shadow: 0 0 40px var(--accent);
+    }
+
+    /* Tilt bars */
+    .tilt-bar-wrap { height: 4px; background: var(--border); }
+    .tilt-bar { height: 100%; background: var(--accent); transition: width 0.08s; }
+
+    /* Chord badge */
+    #chord-badge {
+      position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+      font-size: 11px; letter-spacing: 3px; color: var(--warn);
+      background: var(--surface); border: 1px solid var(--warn);
+      padding: 4px 12px; opacity: 0; transition: opacity 0.2s;
+      pointer-events: none;
+    }
+
+    footer {
+      text-align: center; padding: 7px; font-size: 10px;
+      color: var(--muted); letter-spacing: 2px;
+      border-top: 1px solid var(--border); background: var(--surface);
+      flex-shrink: 0;
+    }
+    footer span { color: var(--danger); }
+
+    select {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 5px 8px; font-family: 'Courier New', monospace; font-size: 11px; outline: none;
+    }
+  </style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 20px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;">
+  <div style="font-size:13px;font-weight:bold;letter-spacing:4px;color:var(--accent);">
+    MPU<span style="color:var(--muted)">//</span>6050 <span style="color:var(--muted)">_INSTRUMENT</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <input type="text" id="ip-input" placeholder="192.168.X.X"/>
+    <button id="connect-btn">Connect</button>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <div id="status-dot"></div>
+      <span id="status-text" style="font-size:11px;color:var(--muted);letter-spacing:1px;">OFFLINE</span>
+    </div>
+    <select id="scale-select">
+      <option value="major">Major</option>
+      <option value="minor">Minor</option>
+      <option value="pentatonic">Pentatonic</option>
+      <option value="blues">Blues</option>
+      <option value="chromatic">Chromatic</option>
+    </select>
+    <select id="octave-select">
+      <option value="3">Octave 3</option>
+      <option value="4" selected>Octave 4</option>
+      <option value="5">Octave 5</option>
+    </select>
+    <select id="wave-select">
+      <option value="sine">Sine</option>
+      <option value="triangle">Triangle</option>
+      <option value="sawtooth">Sawtooth</option>
+      <option value="square">Square</option>
+    </select>
+    <button id="theme-btn">Theme</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div style="display:flex;flex:1;overflow:hidden;">
+
+  <!-- LEFT — visualizer + note -->
+  <div id="viz-wrap" style="flex:1;border-right:1px solid var(--border);">
+    <canvas id="viz"></canvas>
+    <div id="note-display">C4</div>
+    <div id="chord-badge">CHORD</div>
+  </div>
+
+  <!-- RIGHT — controls panel -->
+  <div style="width:240px;display:flex;flex-direction:column;background:var(--surface);flex-shrink:0;overflow:hidden;">
+
+    <!-- Tilt readings -->
+    <div style="padding:10px 16px;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);background:var(--bg);">Tilt / Orientation</div>
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;">
+        <span style="color:var(--muted);letter-spacing:2px;">ROLL</span>
+        <span id="roll-val" style="color:var(--accent);">0.0°</span>
+      </div>
+      <div class="tilt-bar-wrap"><div class="tilt-bar" id="bar-roll" style="width:50%;"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;margin-top:6px;">
+        <span style="color:var(--muted);letter-spacing:2px;">PITCH</span>
+        <span id="pitch-val" style="color:var(--accent);">0.0°</span>
+      </div>
+      <div class="tilt-bar-wrap"><div class="tilt-bar" id="bar-pitch" style="width:50%;"></div></div>
+    </div>
+
+    <!-- Current note -->
+    <div style="padding:10px 16px;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);background:var(--bg);">Current Note</div>
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);text-align:center;">
+      <div id="curr-note" style="font-size:36px;color:var(--accent);letter-spacing:4px;">--</div>
+      <div id="curr-freq" style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:2px;">-- Hz</div>
+    </div>
+
+    <!-- Controls -->
+    <div style="padding:10px 16px;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);background:var(--bg);">Controls</div>
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;">
+          <span style="color:var(--muted);letter-spacing:2px;">VOLUME</span>
+          <span id="vol-val" style="color:var(--accent);">70%</span>
+        </div>
+        <input type="range" id="vol-slider" min="0" max="100" value="70"/>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;">
+          <span style="color:var(--muted);letter-spacing:2px;">REVERB</span>
+          <span id="rev-val" style="color:var(--accent);">20%</span>
+        </div>
+        <input type="range" id="rev-slider" min="0" max="100" value="20"/>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;">
+          <span style="color:var(--muted);letter-spacing:2px;">SHAKE THRESH</span>
+          <span id="thresh-val" style="color:var(--accent);">1.5g</span>
+        </div>
+        <input type="range" id="thresh-slider" min="5" max="40" value="15"/>
+      </div>
+    </div>
+
+    <!-- Shake effect -->
+    <div style="padding:10px 16px;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);background:var(--bg);">Shake Effect</div>
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);">
+      <select id="shake-select" style="width:100%;">
+        <option value="strum">Strum (arpeggio)</option>
+        <option value="drum">Drum hit</option>
+        <option value="glitch">Glitch burst</option>
+        <option value="chord">Full chord</option>
+      </select>
+      <div id="shake-indicator" style="margin-top:8px;font-size:10px;letter-spacing:2px;color:var(--muted);">SHAKE: IDLE</div>
+    </div>
+
+    <!-- Spacer -->
+    <div style="flex:1;"></div>
+
+    <footer style="border-top:1px solid var(--border);">
+      MADE WITH <span>♥</span> BY OM PRAKASH MUNDA
+    </footer>
+  </div>
+</div>
+
+<!-- PIANO -->
+<div id="piano" style="background:var(--bg);border-top:1px solid var(--border);flex-shrink:0;"></div>
+
+<script>
+// ═══════════════════════════════════════════════════
+// SCALES
+// ═══════════════════════════════════════════════════
+const SCALES = {
+  major:      [0,2,4,5,7,9,11],
+  minor:      [0,2,3,5,7,8,10],
+  pentatonic: [0,2,4,7,9],
+  blues:      [0,3,5,6,7,10],
+  chromatic:  [0,1,2,3,4,5,6,7,8,9,10,11]
+};
+
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const SHARP_INDICES = [1,3,6,8,10]; // C#,D#,F#,G#,A#
+
+function midiToFreq(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function noteName(midi) {
+  return NOTE_NAMES[midi % 12] + Math.floor(midi / 12 - 1);
+}
+
+// ═══════════════════════════════════════════════════
+// AUDIO ENGINE
+// ═══════════════════════════════════════════════════
+let audioCtx = null;
+let gainNode, reverbNode, reverbGain, dryGain, analyser;
+let currentOscillator = null;
+let currentNoteIndex = -1;
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  gainNode   = audioCtx.createGain();
+  gainNode.gain.value = 0.7;
+
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+
+  // Reverb via convolver simulation (simple delay-based)
+  reverbNode = audioCtx.createDelay(0.5);
+  reverbNode.delayTime.value = 0.3;
+  const reverbFeedback = audioCtx.createGain();
+  reverbFeedback.gain.value = 0.4;
+  reverbNode.connect(reverbFeedback);
+  reverbFeedback.connect(reverbNode);
+
+  reverbGain = audioCtx.createGain();
+  reverbGain.gain.value = 0.2;
+
+  dryGain = audioCtx.createGain();
+  dryGain.gain.value = 1.0;
+
+  gainNode.connect(dryGain);
+  gainNode.connect(reverbGain);
+  dryGain.connect(analyser);
+  reverbGain.connect(reverbNode);
+  reverbNode.connect(analyser);
+  analyser.connect(audioCtx.destination);
+}
+
+function playNote(freq, duration = 0.4) {
+  if (!audioCtx) return;
+  const osc  = audioCtx.createOscillator();
+  const env  = audioCtx.createGain();
+  osc.type = document.getElementById('wave-select').value;
+  osc.frequency.value = freq;
+  env.gain.setValueAtTime(0, audioCtx.currentTime);
+  env.gain.linearRampToValueAtTime(1, audioCtx.currentTime + 0.01);
+  env.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(env);
+  env.connect(gainNode);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+  return osc;
+}
+
+function playMidi(midi, duration) {
+  return playNote(midiToFreq(midi), duration);
+}
+
+// Sustained note (for tilt hold)
+function startSustainedNote(freq) {
+  stopSustainedNote();
+  if (!audioCtx) return;
+  currentOscillator = audioCtx.createOscillator();
+  const env = audioCtx.createGain();
+  currentOscillator.type = document.getElementById('wave-select').value;
+  currentOscillator.frequency.value = freq;
+  env.gain.setValueAtTime(0, audioCtx.currentTime);
+  env.gain.linearRampToValueAtTime(0.6, audioCtx.currentTime + 0.05);
+  currentOscillator.connect(env);
+  env.connect(gainNode);
+  currentOscillator._env = env;
+  currentOscillator.start();
+}
+
+function stopSustainedNote() {
+  if (!currentOscillator) return;
+  try {
+    currentOscillator._env.gain.setValueAtTime(
+      currentOscillator._env.gain.value, audioCtx.currentTime
+    );
+    currentOscillator._env.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+    currentOscillator.stop(audioCtx.currentTime + 0.1);
+  } catch(e) {}
+  currentOscillator = null;
+}
+
+// ═══════════════════════════════════════════════════
+// SHAKE EFFECTS
+// ═══════════════════════════════════════════════════
+let lastShake = 0;
+
+function triggerShake(scaleMidis) {
+  const now = Date.now();
+  if (now - lastShake < 500) return;
+  lastShake = now;
+
+  const effect = document.getElementById('shake-select').value;
+  document.getElementById('shake-indicator').textContent = 'SHAKE: ' + effect.toUpperCase();
+  setTimeout(() => { document.getElementById('shake-indicator').textContent = 'SHAKE: IDLE'; }, 600);
+
+  if (effect === 'strum') {
+    scaleMidis.slice(0,5).forEach((m,i) => setTimeout(() => playMidi(m, 0.5), i * 60));
+  } else if (effect === 'drum') {
+    // White noise burst
+    const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.1, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const src = audioCtx.createBufferSource();
+    const env = audioCtx.createGain();
+    src.buffer = buf;
+    env.gain.setValueAtTime(1, audioCtx.currentTime);
+    env.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+    src.connect(env); env.connect(gainNode); src.start();
+  } else if (effect === 'glitch') {
+    for (let i = 0; i < 8; i++) {
+      const m = scaleMidis[Math.floor(Math.random() * scaleMidis.length)];
+      setTimeout(() => playMidi(m, 0.08), i * 40);
+    }
+  } else if (effect === 'chord') {
+    [0,2,4].forEach(idx => playMidi(scaleMidis[idx] || scaleMidis[0], 0.8));
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// PIANO KEYBOARD UI
+// ═══════════════════════════════════════════════════
+function buildPiano() {
+  const piano = document.getElementById('piano');
+  piano.innerHTML = '';
+  const octave = parseInt(document.getElementById('octave-select').value);
+  const scale  = SCALES[document.getElementById('scale-select').value];
+  const root   = (octave + 1) * 12; // MIDI base
+
+  // Show 2 octaves of chromatic, highlight scale notes
+  for (let i = 0; i < 24; i++) {
+    const midi     = root + i;
+    const noteIdx  = i % 12;
+    const isSharp  = SHARP_INDICES.includes(noteIdx);
+    const inScale  = scale.includes(noteIdx);
+    const key      = document.createElement('div');
+    key.className  = 'key' + (isSharp ? ' sharp' : '');
+    key.dataset.midi = midi;
+    key.innerHTML  = `<span>${noteName(midi)}</span>`;
+    if (inScale) key.style.borderColor = 'var(--accent)';
+    key.addEventListener('mousedown', () => {
+      initAudio();
+      playMidi(midi, 0.5);
+      flashKey(midi);
+    });
+    piano.appendChild(key);
+  }
+}
+
+function flashKey(midi) {
+  const keys = document.querySelectorAll(`[data-midi="${midi}"]`);
+  keys.forEach(k => {
+    k.classList.add('active');
+    setTimeout(() => k.classList.remove('active'), 300);
+  });
+}
+
+// ═══════════════════════════════════════════════════
+// NOTE DISPLAY
+// ═══════════════════════════════════════════════════
+let noteDisplayTimeout = null;
+
+function showNote(name, freq) {
+  const el = document.getElementById('note-display');
+  el.textContent = name;
+  el.style.opacity = '1';
+  clearTimeout(noteDisplayTimeout);
+  noteDisplayTimeout = setTimeout(() => { el.style.opacity = '0'; }, 800);
+  document.getElementById('curr-note').textContent = name;
+  document.getElementById('curr-freq').textContent = freq.toFixed(1) + ' Hz';
+}
+
+// ═══════════════════════════════════════════════════
+// VISUALIZER
+// ═══════════════════════════════════════════════════
+const vizCanvas = document.getElementById('viz');
+const vCtx = vizCanvas.getContext('2d');
+
+function resizeViz() {
+  const wrap = document.getElementById('viz-wrap');
+  vizCanvas.width  = wrap.clientWidth;
+  vizCanvas.height = wrap.clientHeight;
+}
+
+function drawViz() {
+  requestAnimationFrame(drawViz);
+  resizeViz();
+  const W = vizCanvas.width, H = vizCanvas.height;
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  const bg     = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+
+  vCtx.fillStyle = bg + 'cc';
+  vCtx.fillRect(0, 0, W, H);
+
+  if (!analyser) {
+    // idle grid
+    vCtx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border').trim();
+    vCtx.lineWidth = 1;
+    for (let x = 0; x < W; x += 40) { vCtx.beginPath(); vCtx.moveTo(x,0); vCtx.lineTo(x,H); vCtx.stroke(); }
+    for (let y = 0; y < H; y += 40) { vCtx.beginPath(); vCtx.moveTo(0,y); vCtx.lineTo(W,y); vCtx.stroke(); }
+    return;
+  }
+
+  const bufLen = analyser.fftSize;
+  const data   = new Float32Array(bufLen);
+  analyser.getFloatTimeDomainData(data);
+
+  vCtx.beginPath();
+  vCtx.strokeStyle = accent;
+  vCtx.lineWidth = 2;
+  const step = W / bufLen;
+  for (let i = 0; i < bufLen; i++) {
+    const x = i * step;
+    const y = (1 - (data[i] + 1) / 2) * H;
+    i === 0 ? vCtx.moveTo(x, y) : vCtx.lineTo(x, y);
+  }
+  vCtx.shadowColor = accent;
+  vCtx.shadowBlur  = 6;
+  vCtx.stroke();
+  vCtx.shadowBlur  = 0;
+}
+
+drawViz();
+
+// ═══════════════════════════════════════════════════
+// TILT → NOTE MAPPING
+// ═══════════════════════════════════════════════════
+let roll = 0, pitch = 0;
+
+function tiltToNote(rollDeg, pitchDeg) {
+  const scale  = SCALES[document.getElementById('scale-select').value];
+  const octave = parseInt(document.getElementById('octave-select').value);
+  const root   = (octave + 1) * 12;
+
+  // Map roll (-90° to +90°) to scale index
+  const clamped  = Math.max(-90, Math.min(90, rollDeg));
+  const fraction = (clamped + 90) / 180;
+  const idx      = Math.floor(fraction * scale.length);
+  const safeIdx  = Math.min(idx, scale.length - 1);
+
+  // Pitch (tilt forward/back) shifts octave
+  const octaveShift = pitchDeg > 30 ? 12 : pitchDeg < -30 ? -12 : 0;
+
+  const midi = root + scale[safeIdx] + octaveShift;
+  return { midi, name: noteName(midi), freq: midiToFreq(midi), idx: safeIdx };
+}
+
+// ═══════════════════════════════════════════════════
+// WEBSOCKET
+// ═══════════════════════════════════════════════════
+let ws = null;
+
+function setStatus(on) {
+  document.getElementById('status-dot').className = on ? 'connected' : '';
+  document.getElementById('status-text').textContent = on ? 'LIVE' : 'OFFLINE';
+}
+
+document.getElementById('connect-btn').addEventListener('click', () => {
+  initAudio();
+  const ip = document.getElementById('ip-input').value.trim();
+  if (!ip) return;
+  if (ws) ws.close();
+  ws = new WebSocket(`ws://${ip}:81`);
+  ws.onopen  = () => setStatus(true);
+  ws.onclose = () => { setStatus(false); stopSustainedNote(); };
+  ws.onerror = () => setStatus(false);
+
+  ws.onmessage = ({ data }) => {
+    const d = JSON.parse(data);
+
+    // Complementary filter
+    const dt = 0.05, alpha = 0.96;
+    roll  = alpha * (roll  + d.gx * dt * Math.PI/180) + (1-alpha) * Math.atan2(d.ay, d.az);
+    pitch = alpha * (pitch + d.gy * dt * Math.PI/180) + (1-alpha) * Math.atan2(-d.ax, Math.sqrt(d.ay**2 + d.az**2));
+
+    const rollDeg  = roll  * 180 / Math.PI;
+    const pitchDeg = pitch * 180 / Math.PI;
+
+    // Update tilt bars
+    document.getElementById('roll-val').textContent  = rollDeg.toFixed(1)  + '°';
+    document.getElementById('pitch-val').textContent = pitchDeg.toFixed(1) + '°';
+    document.getElementById('bar-roll').style.width  = ((rollDeg  + 90) / 180 * 100) + '%';
+    document.getElementById('bar-pitch').style.width = ((pitchDeg + 90) / 180 * 100) + '%';
+
+    // Tilt → note
+    const { midi, name, freq, idx } = tiltToNote(rollDeg, pitchDeg);
+
+    if (idx !== currentNoteIndex) {
+      currentNoteIndex = idx;
+      initAudio();
+      startSustainedNote(freq);
+      showNote(name, freq);
+      flashKey(midi);
+    }
+
+    // Shake detection
+    const mag   = Math.sqrt(d.ax**2 + d.ay**2 + d.az**2);
+    const netG  = Math.abs(mag - 1.0);
+    const thresh = parseInt(document.getElementById('thresh-slider').value) / 10;
+    if (netG > thresh) {
+      const scale  = SCALES[document.getElementById('scale-select').value];
+      const octave = parseInt(document.getElementById('octave-select').value);
+      const root   = (octave + 1) * 12;
+      const midis  = scale.map(s => root + s);
+      triggerShake(midis);
+    }
+  };
+});
+
+// ═══════════════════════════════════════════════════
+// CONTROLS
+// ═══════════════════════════════════════════════════
+document.getElementById('theme-btn').addEventListener('click', () => {
+  document.documentElement.dataset.theme =
+    document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+});
+
+document.getElementById('vol-slider').addEventListener('input', function() {
+  if (gainNode) gainNode.gain.value = this.value / 100;
+  document.getElementById('vol-val').textContent = this.value + '%';
+});
+
+document.getElementById('rev-slider').addEventListener('input', function() {
+  if (reverbGain) reverbGain.gain.value = this.value / 100;
+  document.getElementById('rev-val').textContent = this.value + '%';
+});
+
+document.getElementById('thresh-slider').addEventListener('input', function() {
+  document.getElementById('thresh-val').textContent = (this.value / 10).toFixed(1) + 'g';
+});
+
+document.getElementById('scale-select').addEventListener('change', () => {
+  buildPiano(); currentNoteIndex = -1;
+});
+document.getElementById('octave-select').addEventListener('change', () => {
+  buildPiano(); currentNoteIndex = -1;
+});
+
+// Init piano
+buildPiano();
+
+// Unlock audio on first click (browser policy)
+document.body.addEventListener('click', initAudio, { once: true });
+</script>
+</body>
+</html>

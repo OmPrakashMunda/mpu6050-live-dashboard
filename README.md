@@ -1,21 +1,43 @@
 # MPU6050 Live Dashboard
 
 A real-time web dashboard for visualizing MPU6050 IMU data streamed from an ESP8266 over WebSocket.
-Features a live 3D orientation model, motion intensity gauge, and raw sensor readings — all in a single HTML file with zero dependencies to install.
+Features a live 3D orientation model, motion intensity gauge, raw sensor readings, and a tilt-controlled
+musical instrument — all in single HTML files with zero dependencies to install.
 
-![Dashboard Preview](preview.png)
+---
+
+## Screenshots
+
+### Dashboard
+![Dashboard Dark Mode](screenshots/dashboard-dark.png)
+![Dashboard Light Mode](screenshots/dashboard-light.png)
+
+### Instrument
+![Instrument](screenshots/instrument.png)
 
 ---
 
 ## Features
 
+### Dashboard (`dashboard/index.html`)
 - **3D Orientation** — Live Three.js board model rotates with the physical sensor
 - **Motion Gauge** — Canvas-drawn speedometer showing net acceleration in m/s²
 - **Raw Data Panel** — Accelerometer (g), Gyroscope (°/s), and computed Roll/Pitch/Yaw
-- **IP Input** — Connect to any ESP8266 directly from the browser, no code changes
+- **IP Input** — Connect to any ESP8266 directly from the browser
 - **Theme Switch** — Dark / Light mode
 - **No backend needed** — Browser connects directly to ESP8266 WebSocket
 - **Built-in Documentation** — Full math and wiring reference scrollable below the dashboard
+
+### Instrument (`instrument/index.html`)
+- **Tilt → Note** — Roll axis maps across a musical scale in real time
+- **Pitch → Octave** — Tilt forward/back to shift an octave up or down
+- **Shake → Effects** — Strum, Drum hit, Glitch burst, or Full chord on shake
+- **Scale Selector** — Major, Minor, Pentatonic, Blues, Chromatic
+- **Waveform Selector** — Sine, Triangle, Sawtooth, Square
+- **Volume + Reverb** — Adjustable sliders
+- **Shake Threshold** — Tune sensitivity of shake detection
+- **Live Waveform Visualizer** — Canvas oscilloscope of the audio output
+- **Clickable Piano Keyboard** — Scale notes highlighted, playable by mouse
 
 ---
 
@@ -69,14 +91,25 @@ Install via **Arduino IDE → Sketch → Manage Libraries**:
 
 ---
 
-## Web Dashboard
+## Usage
 
+### Dashboard
 1. Open `dashboard/index.html` in any modern browser
 2. Enter the ESP8266 IP address in the input field
-3. Click **Connect**
-4. Status dot turns green — data streams live
+3. Click **Connect** — status dot turns green
+4. Tilt and move the sensor to see the 3D model respond live
+5. Scroll down for full documentation
 
-> Both the ESP8266 and your browser must be on the **same WiFi network.**
+### Instrument
+1. Open `instrument/index.html` in any modern browser
+2. Enter the ESP8266 IP and click **Connect**
+3. Click anywhere on the page first to unlock browser audio
+4. **Tilt left/right** to change notes across the scale
+5. **Tilt forward/back** beyond 30° to shift an octave
+6. **Shake** the sensor to trigger the selected effect
+7. Use the piano keyboard at the bottom to play manually
+
+> Both devices must be on the **same WiFi network.**
 
 ---
 
@@ -84,33 +117,38 @@ Install via **Arduino IDE → Sketch → Manage Libraries**:
 
 ### Complementary Filter (Orientation)
 
-Fuses gyroscope and accelerometer to estimate roll and pitch:
-
 ```
 roll  = 0.96 × (roll  + gx × dt × π/180) + 0.04 × atan2(ay, az)
 pitch = 0.96 × (pitch + gy × dt × π/180) + 0.04 × atan2(-ax, √(ay²+az²))
-yaw  += gz × dt × π/180   // gyro only
+yaw  += gz × dt × π/180
 ```
 
-### Motion Gauge
-
-Net dynamic acceleration excluding gravity:
+### Motion Gauge / Shake Detection
 
 ```
 magnitude = √(ax² + ay² + az²)
-net_g     = |magnitude − 1.0|
+net_g     = |magnitude − 1.0|       ← subtract gravity
 net_ms²   = net_g × 9.81
+smoothG   = 0.8 × prev + 0.2 × net_g
 ```
 
-Smoothed with exponential moving average: `smoothG = 0.8 × prev + 0.2 × net_g`
+### Tilt → Note Mapping
 
-### Data Rate
+```
+roll range: -90° to +90°  →  maps to scale index 0..N
+fraction  = (roll + 90) / 180
+noteIndex = floor(fraction × scale.length)
+midi      = rootNote + scale[noteIndex] + octaveShift
+frequency = 440 × 2^((midi - 69) / 12)
+```
 
-ESP8266 broadcasts JSON at ~20Hz (every 50ms):
+### Data Format (ESP → Browser)
+
 ```json
 { "ax": 0.012, "ay": -0.004, "az": 0.998,
   "gx": 0.31,  "gy": -0.12,  "gz": 0.08 }
 ```
+Streamed over WebSocket at ~20Hz (port 81).
 
 ---
 
@@ -119,10 +157,15 @@ ESP8266 broadcasts JSON at ~20Hz (every 50ms):
 ```
 mpu6050-live-dashboard/
 ├── firmware/
-│   └── firmware.ino       # ESP8266 Arduino sketch
+│   └── firmware.ino            # ESP8266 Arduino sketch
 ├── dashboard/
-│   └── index.html         # Single-file web dashboard
-├── preview.png            # Screenshot
+│   └── index.html              # 3D orientation dashboard
+├── instrument/
+│   └── index.html              # Tilt-controlled instrument
+├── screenshots/
+│   ├── dashboard-dark.png
+│   ├── dashboard-light.png
+│   └── instrument.png
 └── README.md
 ```
 
@@ -131,15 +174,17 @@ mpu6050-live-dashboard/
 ## Known Limitations
 
 - **Yaw drifts** over time — no magnetometer reference. Use MPU9250 for drift-free yaw.
-- **Speed cannot be derived reliably** from accelerometer alone due to integration drift.
-- Dashboard requires both devices on the same local network (no remote access by default).
+- **Absolute speed** cannot be derived reliably from accelerometer alone (integration drift).
+- Requires both devices on the same local network (no remote access by default).
+- Browser audio requires a user gesture before it unlocks (click anywhere first).
 
 ---
 
 ## Built With
 
 - [Three.js](https://threejs.org/) — 3D rendering
-- [Tailwind CSS](https://tailwindcss.com/) — Utility styling (docs section)
+- [Tailwind CSS](https://tailwindcss.com/) — Utility styling
+- [Web Audio API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API) — Sound synthesis
 - [ArduinoJson](https://arduinojson.org/) — JSON on ESP8266
 - [WebSockets](https://github.com/Links2004/arduinoWebSockets) — WebSocket server on ESP8266
 
