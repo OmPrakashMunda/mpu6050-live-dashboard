@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <title>MPU6050 Dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --bg: #080b0f; --surface: #0e1318; --border: #1e2a35;
+      --text: #e0eaf4; --muted: #4a6070; --accent: #00aaff;
+      --danger: #ff4455; --success: #00dd88;
+    }
+    [data-theme="light"] {
+      --bg: #f0f4f8; --surface: #ffffff; --border: #c8d6e0;
+      --text: #0a1520; --muted: #7a90a0; --accent: #0077cc;
+      --danger: #cc2233; --success: #009955;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Courier New', monospace; background: var(--bg); color: var(--text); }
+    input, button { font-family: 'Courier New', monospace; }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      overflow-y: scroll;
+      scroll-snap-type: y mandatory;
+      height: 100vh;
+    }
+
+    #dashboard-wrapper {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      scroll-snap-align: start;
+    }
+
+    #topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 20px; border-bottom: 1px solid var(--border);
+      background: var(--surface); flex-shrink: 0;
+    }
+    .logo { font-size: 13px; font-weight: bold; letter-spacing: 4px; color: var(--accent); }
+    .logo span { color: var(--muted); }
+
+    .connect-row { display: flex; align-items: center; gap: 8px; }
+    input[type=text] {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 6px 12px; font-size: 12px; width: 170px; outline: none;
+    }
+    input[type=text]:focus { border-color: var(--accent); }
+    input[type=text]::placeholder { color: var(--muted); }
+
+    button {
+      background: transparent; border: 1px solid var(--accent); color: var(--accent);
+      padding: 6px 14px; font-size: 12px; cursor: pointer;
+      letter-spacing: 1px; text-transform: uppercase; transition: background 0.15s;
+    }
+    button:hover { background: var(--accent); color: var(--bg); }
+    #theme-btn { border-color: var(--muted); color: var(--muted); }
+    #theme-btn:hover { background: var(--muted); color: var(--bg); }
+
+    #status-dot {
+      width: 8px; height: 8px; background: var(--danger);
+      display: inline-block; margin-right: 4px;
+    }
+    #status-dot.connected { background: var(--success); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    #status-text { font-size: 11px; color: var(--muted); letter-spacing: 1px; }
+
+    #dashboard {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    #canvas-container {
+      flex: 1; position: relative; border-right: 1px solid var(--border);
+      overflow: hidden;
+    }
+    #canvas-label {
+      position: absolute; top: 14px; left: 16px;
+      font-size: 10px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase;
+    }
+
+    /* Panel — no scroll, fits everything inside */
+    #panel {
+      width: 260px;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .section-header {
+      padding: 7px 16px; font-size: 9px; letter-spacing: 3px;
+      text-transform: uppercase; color: var(--muted);
+      border-bottom: 1px solid var(--border); background: var(--bg);
+      flex-shrink: 0;
+    }
+
+    .data-block { padding: 8px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .data-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; }
+    .axis { color: var(--muted); font-size: 11px; letter-spacing: 2px; }
+    .val  { color: var(--text); font-size: 12px; min-width: 80px; text-align: right; }
+    .bar-wrap { height: 2px; background: var(--border); margin-top: 2px; }
+    .bar-fill { height: 100%; background: var(--accent); width: 50%; transition: width 0.1s; }
+
+    #speedo-block {
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      flex-shrink: 0;
+    }
+
+    footer {
+      text-align: center; padding: 8px; font-size: 10px;
+      color: var(--muted); letter-spacing: 2px;
+      border-top: 1px solid var(--border); background: var(--surface);
+      flex-shrink: 0;
+    }
+    footer span { color: var(--danger); }
+
+    /* DOCS */
+    #docs {
+      background: var(--bg); color: var(--text);
+      border-top: 2px solid var(--border);
+      scroll-snap-align: start;
+      flex-shrink: 0;
+    }
+    .doc-section { border-bottom: 1px solid var(--border); }
+    code {
+      background: var(--surface); color: var(--accent);
+      padding: 2px 6px; font-family: 'Courier New', monospace; font-size: 13px;
+    }
+    pre {
+      background: var(--surface); border: 1px solid var(--border);
+      padding: 16px; overflow-x: auto; font-size: 12px;
+      color: var(--text); line-height: 1.7; margin: 0 24px;
+    }
+    .math {
+      background: var(--surface); border-left: 3px solid var(--accent);
+      padding: 12px 16px; font-size: 14px; letter-spacing: 1px;
+      margin: 8px 24px; color: var(--accent);
+    }
+    h2.doc-title {
+      font-size: 11px; letter-spacing: 4px; text-transform: uppercase;
+      color: var(--accent); padding: 20px 24px 8px;
+    }
+    p.doc-p {
+      color: var(--muted); font-size: 13px; line-height: 1.8;
+      padding: 0 24px 16px; font-family: 'Courier New', monospace;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- DASHBOARD WRAPPER — exactly 100vh -->
+  <div id="dashboard-wrapper">
+
+    <!-- TOP BAR -->
+    <div id="topbar">
+      <div class="logo">MPU<span>//</span>6050 <span>_DASH</span></div>
+      <div class="connect-row">
+        <input type="text" id="ip-input" placeholder="192.168.X.X" value="10.181.186.157"/>
+        <button id="connect-btn">Connect</button>
+        <div style="display:flex;align-items:center;gap:6px;margin-left:8px;">
+          <div id="status-dot"></div>
+          <span id="status-text">OFFLINE</span>
+        </div>
+        <button id="theme-btn" style="margin-left:12px;">Theme</button>
+      </div>
+    </div>
+
+    <!-- MAIN DASHBOARD -->
+    <div id="dashboard">
+
+      <!-- 3D VIEW -->
+      <div id="canvas-container">
+        <div id="canvas-label">3D Orientation</div>
+      </div>
+
+      <!-- SIDE PANEL -->
+      <div id="panel">
+
+        <div class="section-header">Motion Intensity</div>
+        <div id="speedo-block">
+          <canvas id="speedo-canvas" width="214" height="110"></canvas>
+          <div style="font-size:22px;color:var(--accent);letter-spacing:2px;" id="speedo-val">0.00</div>
+          <div style="font-size:9px;color:var(--muted);letter-spacing:2px;">m/s² NET ACCEL</div>
+        </div>
+
+        <div class="section-header">Accelerometer / g</div>
+        <div class="data-block">
+          <div class="data-row"><span class="axis">X_ACCEL</span><span class="val" id="ax">-.---</span></div>
+          <div class="bar-wrap"><div class="bar-fill" id="bar-ax"></div></div>
+          <div class="data-row"><span class="axis">Y_ACCEL</span><span class="val" id="ay">-.---</span></div>
+          <div class="bar-wrap"><div class="bar-fill" id="bar-ay"></div></div>
+          <div class="data-row"><span class="axis">Z_ACCEL</span><span class="val" id="az">-.---</span></div>
+          <div class="bar-wrap"><div class="bar-fill" id="bar-az"></div></div>
+        </div>
+
+        <div class="section-header">Gyroscope / °/s</div>
+        <div class="data-block">
+          <div class="data-row"><span class="axis">X_GYRO</span><span class="val" id="gx">-.--</span></div>
+          <div class="bar-wrap"><div class="bar-fill" id="bar-gx"></div></div>
+          <div class="data-row"><span class="axis">Y_GYRO</span><span class="val" id="gy">-.--</span></div>
+          <div class="bar-wrap"><div class="bar-fill" id="bar-gy"></div></div>
+          <div class="data-row"><span class="axis">Z_GYRO</span><span class="val" id="gz">-.--</span></div>
+          <div class="bar-wrap"><div class="bar-fill" id="bar-gz"></div></div>
+        </div>
+
+        <div class="section-header">Orientation / rad</div>
+        <div class="data-block">
+          <div class="data-row"><span class="axis">ROLL</span> <span class="val" id="roll">-.---</span></div>
+          <div class="data-row"><span class="axis">PITCH</span><span class="val" id="pitch">-.---</span></div>
+          <div class="data-row"><span class="axis">YAW</span>  <span class="val" id="yaw">-.---</span></div>
+        </div>
+
+        <!-- spacer to push footer down -->
+        <div style="flex:1;"></div>
+
+        <footer style="border-top:1px solid var(--border);">
+          MADE WITH <span style="color:var(--danger);">♥</span> BY OM PRAKASH MUNDA
+        </footer>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- DOCUMENTATION (scroll snap section below) -->
+  <div id="docs">
+
+    <div class="px-6 py-8 border-b border-[var(--border)]">
+      <p style="font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--accent);margin-bottom:12px;">// HOW IT WORKS</p>
+      <h1 style="font-size:22px;font-weight:bold;letter-spacing:4px;color:var(--text);margin-bottom:12px;">MPU6050 DASHBOARD — DOCUMENTATION</h1>
+      <p class="doc-p" style="padding:0;">
+        This dashboard reads 6-axis IMU data from an MPU6050 sensor connected to an ESP8266.
+        The ESP streams JSON over WebSocket at ~20Hz. The browser receives it, computes orientation
+        via a complementary filter, renders a live 3D model using Three.js, and displays motion
+        intensity on a canvas-drawn gauge.
+      </p>
+    </div>
+
+    <div class="doc-section px-6 py-6">
+      <h2 class="doc-title">01 / MPU6050 — Sensor Basics</h2>
+      <p class="doc-p">
+        The MPU6050 is a 6-axis IMU with a 3-axis accelerometer and 3-axis gyroscope on one chip.
+        It communicates over I²C. The AD0 pin selects the I²C address:
+      </p>
+      <pre>AD0 → GND  :  I²C address = 0x68  (default)
+AD0 → VCC  :  I²C address = 0x69  (use for two sensors on same bus)</pre>
+      <p class="doc-p" style="padding-top:12px;">Raw 16-bit integers are scaled to real units:</p>
+      <div class="math">Accel (g)   =  raw_value  /  16384.0   &nbsp;&nbsp;[±2g range]</div>
+      <div class="math">Gyro (°/s)  =  raw_value  /  131.0     &nbsp;&nbsp;[±250°/s range]</div>
+    </div>
+
+    <div class="doc-section px-6 py-6">
+      <h2 class="doc-title">02 / ESP8266 — Data Streaming</h2>
+      <p class="doc-p">
+        The ESP8266 reads MPU6050 via I²C (SDA=D2, SCL=D1) and broadcasts a JSON packet
+        over WebSocket on port 81 every 50ms. No server needed — browser connects directly
+        to the ESP on the same WiFi network.
+      </p>
+      <pre>{ "ax": 0.012, "ay": -0.004, "az": 0.998,
+  "gx": 0.31,  "gy": -0.12,  "gz": 0.08  }</pre>
+    </div>
+
+    <div class="doc-section px-6 py-6">
+      <h2 class="doc-title">03 / Complementary Filter — Orientation</h2>
+      <p class="doc-p">
+        Gyroscope is fast but drifts. Accelerometer is drift-free but noisy.
+        A complementary filter blends both — 96% gyro for short-term, 4% accel for long-term correction.
+      </p>
+      <div class="math">angle = α × (angle + gyro × dt) + (1 − α) × accel_angle</div>
+      <pre>accelRoll  = atan2(ay, az)
+accelPitch = atan2(-ax, sqrt(ay² + az²))
+
+roll  = 0.96 × (roll  + gx × dt × π/180) + 0.04 × accelRoll
+pitch = 0.96 × (pitch + gy × dt × π/180) + 0.04 × accelPitch
+yaw  += gz × dt × π/180   // gyro only — no accel reference for yaw</pre>
+      <p class="doc-p" style="padding-top:12px;color:var(--danger);">
+        ⚠ Yaw drifts over time — there's no absolute reference without a magnetometer.
+        Use MPU9250 or HMC5883L for drift-free yaw.
+      </p>
+    </div>
+
+    <div class="doc-section px-6 py-6">
+      <h2 class="doc-title">04 / Motion Gauge — The Math</h2>
+      <p class="doc-p">Shows net dynamic acceleration — motion force excluding static gravity.</p>
+      <div class="math">magnitude  =  √(ax² + ay² + az²)   &nbsp;&nbsp;[in g]</div>
+      <div class="math">net_g      =  | magnitude − 1.0 |   &nbsp;&nbsp;[subtract 1g gravity]</div>
+      <div class="math">net_ms²    =  net_g × 9.81          &nbsp;&nbsp;[convert to m/s²]</div>
+      <p class="doc-p" style="padding-top:12px;">Exponential moving average smooths the needle:</p>
+      <div class="math">smoothG = 0.8 × smoothG_prev + 0.2 × net_g</div>
+    </div>
+
+    <div class="doc-section px-6 py-6">
+      <h2 class="doc-title">05 / 3D Rendering — Three.js</h2>
+      <p class="doc-p">
+        The board is a <code>BoxGeometry</code> mesh rendered via <code>WebGLRenderer</code>.
+        Each frame its Euler rotation is set directly from the complementary filter output:
+      </p>
+      <pre>board.rotation.set(pitch, yaw, roll)  // Three.js XYZ Euler order</pre>
+    </div>
+
+    <div class="doc-section px-6 py-6">
+      <h2 class="doc-title">06 / Wiring Reference</h2>
+      <pre>MPU6050 Pin  →  ESP8266 (NodeMCU)
+──────────────────────────────────
+VCC          →  3.3V
+GND          →  GND
+SDA          →  D2  (GPIO 4)
+SCL          →  D1  (GPIO 5)
+AD0          →  GND (I²C addr 0x68)</pre>
+    </div>
+
+    <div class="doc-section px-6 py-6">
+      <h2 class="doc-title">07 / Arduino Libraries</h2>
+      <pre>MPU6050       →  by Electronic Cats      (sensor driver)
+WebSockets    →  by Markus Sattler        (WebSocketsServer.h)
+ArduinoJson   →  by Benoit Blanchon       (JSON serialization)
+ESP8266WiFi   →  built into ESP8266 core  (WiFi)</pre>
+    </div>
+
+    <div style="text-align:center;padding:16px;font-size:10px;color:var(--muted);letter-spacing:2px;border-top:1px solid var(--border);background:var(--surface);">
+      MADE WITH <span style="color:var(--danger);">♥</span> BY OM PRAKASH MUNDA
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // ── Theme ─────────────────────────────────────────────────
+  document.getElementById('theme-btn').addEventListener('click', () => {
+    document.documentElement.dataset.theme =
+      document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    setTimeout(() => drawSpeedo(currentG), 50);
+  });
+
+  function cssVar(v) {
+    return getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  }
+
+  // ── Speedometer ───────────────────────────────────────────
+  const sc = document.getElementById('speedo-canvas');
+  const sx = sc.getContext('2d');
+  const W = sc.width, H = sc.height;
+  const CX = W / 2, CY = H - 6;
+  const R = 82, MAX_G = 3;
+  let currentG = 0, smoothG = 0;
+
+  function drawSpeedo(g) {
+    sx.clearRect(0, 0, W, H);
+    const accent  = cssVar('--accent');
+    const muted   = cssVar('--muted');
+    const border  = cssVar('--border');
+    const textCol = cssVar('--text');
+    const bg      = cssVar('--surface');
+    const fraction   = Math.min(g / MAX_G, 1);
+    const needleAngle = Math.PI + fraction * Math.PI;
+
+    // Background arc
+    sx.beginPath();
+    sx.arc(CX, CY, R, Math.PI, 2 * Math.PI);
+    sx.strokeStyle = border;
+    sx.lineWidth = 8;
+    sx.stroke();
+
+    // Value arc
+    if (fraction > 0) {
+      const grad = sx.createLinearGradient(CX - R, CY, CX + R, CY);
+      grad.addColorStop(0,   '#00dd88');
+      grad.addColorStop(0.5, '#ffcc00');
+      grad.addColorStop(1,   '#ff4455');
+      sx.beginPath();
+      sx.arc(CX, CY, R, Math.PI, Math.PI + fraction * Math.PI);
+      sx.strokeStyle = grad;
+      sx.lineWidth = 8;
+      sx.stroke();
+    }
+
+    // Ticks
+    for (let i = 0; i <= 12; i++) {
+      const a    = Math.PI + (i / 12) * Math.PI;
+      const isMaj = i % 4 === 0;
+      sx.beginPath();
+      sx.moveTo(CX + Math.cos(a) * (R + 4), CY + Math.sin(a) * (R + 4));
+      sx.lineTo(CX + Math.cos(a) * (isMaj ? R - 12 : R - 6), CY + Math.sin(a) * (isMaj ? R - 12 : R - 6));
+      sx.strokeStyle = isMaj ? textCol : muted;
+      sx.lineWidth   = isMaj ? 1.5 : 0.8;
+      sx.stroke();
+    }
+
+    // Labels
+    sx.fillStyle = muted; sx.font = '9px Courier New';
+    sx.textAlign = 'center'; sx.textBaseline = 'middle';
+    [0,1,2,3].forEach((lbl, i) => {
+      const a = Math.PI + (i / 3) * Math.PI;
+      sx.fillText(lbl+'g', CX + Math.cos(a)*(R-22), CY + Math.sin(a)*(R-22));
+    });
+
+    // Needle
+    const nx = CX + Math.cos(needleAngle) * (R - 10);
+    const ny = CY + Math.sin(needleAngle) * (R - 10);
+    sx.shadowColor = accent; sx.shadowBlur = 10;
+    sx.beginPath();
+    sx.moveTo(CX, CY);
+    sx.lineTo(nx, ny);
+    sx.strokeStyle = accent; sx.lineWidth = 2; sx.lineCap = 'round'; sx.stroke();
+    sx.beginPath();
+    sx.arc(nx, ny, 3, 0, 2*Math.PI);
+    sx.fillStyle = accent; sx.fill();
+    sx.shadowBlur = 0;
+
+    // Pivot
+    sx.beginPath(); sx.arc(CX, CY, 5, 0, 2*Math.PI); sx.fillStyle = accent; sx.fill();
+    sx.beginPath(); sx.arc(CX, CY, 5, 0, 2*Math.PI); sx.strokeStyle = bg; sx.lineWidth = 1.5; sx.stroke();
+  }
+
+  drawSpeedo(0);
+
+  // ── Three.js ──────────────────────────────────────────────
+  const container = document.getElementById('canvas-container');
+  const scene  = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.1, 100);
+  camera.position.set(2, 1.5, 3); camera.lookAt(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setClearColor(0x000000, 0);
+  container.appendChild(renderer.domElement);
+
+  const geo = new THREE.BoxGeometry(2, 0.15, 1.4);
+  const board = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color: 0x003355, transparent: true, opacity: 0.9 }));
+  scene.add(board);
+  board.add(new THREE.LineSegments(
+    new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({ color: 0x00aaff, opacity: 0.6, transparent: true })
+  ));
+  const grid = new THREE.GridHelper(6, 12, 0x1e2a35, 0x1e2a35);
+  grid.position.y = -1.2; scene.add(grid);
+  scene.add(new THREE.AxesHelper(1.5));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const dl = new THREE.DirectionalLight(0x00aaff, 1.2);
+  dl.position.set(5, 8, 5); scene.add(dl);
+
+  let roll = 0, pitch = 0, yaw = 0;
+  (function animate() {
+    requestAnimationFrame(animate);
+    board.rotation.set(pitch, yaw, roll);
+    renderer.render(scene, camera);
+  })();
+
+  window.addEventListener('resize', () => {
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+  });
+
+  // ── WebSocket ─────────────────────────────────────────────
+  let ws = null;
+
+  function setStatus(on) {
+    document.getElementById('status-dot').className = on ? 'connected' : '';
+    document.getElementById('status-text').textContent = on ? 'LIVE' : 'OFFLINE';
+  }
+  function setBar(id, val, max) {
+    document.getElementById(id).style.width =
+      Math.min(100, Math.max(0, ((val + max) / (2 * max)) * 100)) + '%';
+  }
+
+  document.getElementById('connect-btn').addEventListener('click', () => {
+    const ip = document.getElementById('ip-input').value.trim();
+    if (!ip) return;
+    if (ws) ws.close();
+    ws = new WebSocket(`ws://${ip}:81`);
+    ws.onopen  = () => setStatus(true);
+    ws.onclose = () => setStatus(false);
+    ws.onerror = () => setStatus(false);
+
+    ws.onmessage = ({ data }) => {
+      const d = JSON.parse(data);
+
+      document.getElementById('ax').textContent = d.ax.toFixed(3);
+      document.getElementById('ay').textContent = d.ay.toFixed(3);
+      document.getElementById('az').textContent = d.az.toFixed(3);
+      document.getElementById('gx').textContent = d.gx.toFixed(2);
+      document.getElementById('gy').textContent = d.gy.toFixed(2);
+      document.getElementById('gz').textContent = d.gz.toFixed(2);
+
+      setBar('bar-ax', d.ax, 2);   setBar('bar-ay', d.ay, 2);   setBar('bar-az', d.az, 2);
+      setBar('bar-gx', d.gx, 250); setBar('bar-gy', d.gy, 250); setBar('bar-gz', d.gz, 250);
+
+      const dt = 0.05, alpha = 0.96;
+      roll  = alpha * (roll  + d.gx * dt * Math.PI/180) + (1-alpha) * Math.atan2(d.ay, d.az);
+      pitch = alpha * (pitch + d.gy * dt * Math.PI/180) + (1-alpha) * Math.atan2(-d.ax, Math.sqrt(d.ay**2 + d.az**2));
+      yaw  += d.gz * dt * Math.PI / 180;
+
+      document.getElementById('roll').textContent  = roll.toFixed(3);
+      document.getElementById('pitch').textContent = pitch.toFixed(3);
+      document.getElementById('yaw').textContent   = yaw.toFixed(3);
+
+      const mag = Math.sqrt(d.ax**2 + d.ay**2 + d.az**2);
+      smoothG   = 0.8 * smoothG + 0.2 * Math.abs(mag - 1.0);
+      currentG  = smoothG;
+      document.getElementById('speedo-val').textContent = (smoothG * 9.81).toFixed(2);
+      drawSpeedo(smoothG);
+    };
+  });
+</script>
+</body>
+</html>
